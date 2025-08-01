@@ -68,7 +68,11 @@ func main() {
 	}
 
 	// get terminal info
-	width, _, _ := term.GetSize(int(os.Stdin.Fd()))
+	termHandle := int(os.Stderr.Fd())
+	width, _, err := term.GetSize(termHandle)
+	if err != nil {
+		log.Fatal(err)
+	}
 	// calculate the number of lines the words will take up
 	linesNum := len(wordsString) / width
 
@@ -85,11 +89,11 @@ func main() {
 	fmt.Printf("\033[1A\0337\033[1B")
 
 	// put terminal into raw mode
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	oldState, err := term.MakeRaw(termHandle)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
-	defer term.Restore(int(os.Stdin.Fd()), oldState)
+	defer term.Restore(termHandle, oldState)
 
 	// setup input reader
 	reader := bufio.NewReader(os.Stdin)
@@ -149,7 +153,7 @@ func main() {
 			fmt.Printf("\033[1D")
 			printfColor(backgroundColor, "%c", getIndexString(cursorIndex, wordsString))
 			fmt.Printf("\033[1D")
-		case char == 32: // space
+		case char == ' ': // space
 			if firstInput {
 				start = time.Now()
 				firstInput = false
@@ -164,7 +168,7 @@ func main() {
 			typedChars = append(typedChars, char)
 			typedCharsStyled = append(typedCharsStyled, styledChar)
 			cursorIndex += 1
-		case 97 <= char && char <= 122: // a-z
+		case char >= 'a' && char <= 'z': // a-z
 			if firstInput {
 				start = time.Now()
 				firstInput = false
@@ -192,7 +196,7 @@ func main() {
 	}
 
 	// turn off raw mode
-	term.Restore(int(os.Stdin.Fd()), oldState)
+	term.Restore(termHandle, oldState)
 
 	if len(typedChars) != len([]rune(wordsString)) {
 		log.Fatal("slices have different size")
@@ -243,9 +247,9 @@ func getIndexString(index int, s string) rune {
 }
 
 func printfColor(colorCode string, format string, a ...any) (n int, err error) {
-	return fmt.Fprintf(os.Stdout, colorCode+format+"\033[0m", a...)
+	return fmt.Fprintf(os.Stdout, colorCode+format+resetColor, a...)
 }
 
 func sprintfColor(colorCode string, format string, a ...any) string {
-	return fmt.Sprintf(colorCode+format+"\033[0m", a...)
+	return fmt.Sprintf(colorCode+format+resetColor, a...)
 }

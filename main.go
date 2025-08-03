@@ -26,6 +26,7 @@ var blockCursor = "\033[1 q"
 var underlineCursor = "\033[3 q"
 var barCursor = "\033[5 q"
 
+// TODO: dont update info line while in a typing logic sycle
 // TODO: show mistyped chars
 // TODO: dont generate words longer than maxLineLength
 // TODO: timed mode
@@ -111,19 +112,26 @@ func main() {
 	var start time.Time
 
 	// draw info line
+	stopInfo := make(chan bool)
 	go func() {
-		for firstInput {
-			// wait until first input to update info line
-		}
-		for range time.Tick(time.Millisecond * 100) {
-			// move cursor up to the position of the info line
-			fmt.Printf("\0338\033[2K\r")
+		for range time.Tick(100 * time.Millisecond) {
+			select {
+			case <-stopInfo:
+				return
+			default:
+				if firstInput {
+					continue
+				}
 
-			// draw timer and wpm
-			printfColor(infoColor, "%s -- WPM: %.0f", time.Since(start).Round(time.Second), float64(len(typedChars))/5/time.Since(start).Minutes())
+				// move cursor up to the position of the info line
+				fmt.Printf("\0338\033[2K\r")
 
-			// move cursor back down
-			fmt.Printf("\033[%dB\033[%dG", cursorRow, cursorColumn)
+				// draw timer and wpm
+				printfColor(infoColor, "%s -- WPM: %.0f", time.Since(start).Round(time.Second), float64(len(typedChars))/5/time.Since(start).Minutes())
+
+				// move cursor back down
+				fmt.Printf("\033[%dB\033[%dG", cursorRow, cursorColumn)
+			}
 		}
 	}()
 
@@ -136,6 +144,7 @@ func main() {
 
 		// quit on ctrl-c
 		if char == 3 {
+			stopInfo <- true
 			fmt.Printf("\0338")
 			for range linesNum + 1 {
 				fmt.Printf("\033[2K\033[1B")
@@ -210,6 +219,8 @@ func main() {
 			break
 		}
 	}
+
+	stopInfo <- true
 
 	// turn off raw mode
 	term.Restore(termHandle, oldState)

@@ -91,13 +91,8 @@ func main() {
 	fmt.Println("0s -- WPM: 0")
 	printfColor(backgroundColor, "%s\r", wordsString)
 
-	// move cursor up if lines wrap
-	if linesNum > 1 {
-		fmt.Printf("\033[%dA", linesNum)
-	}
-
 	// save cursor position at "(0, 0)" and move down to text start
-	fmt.Printf("\0337\033[1B")
+	fmt.Printf("\033[%dA\0337\033[1B", linesNum)
 
 	// put terminal into raw mode
 	oldState, err := term.MakeRaw(termHandle)

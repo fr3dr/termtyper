@@ -16,15 +16,19 @@ import (
 // ANSI color escape codes
 var resetColor = "\033[0m"
 var backgroundColor = "\033[90m"
+var infoStartColor = "\033[2;92m"
 var infoColor = "\033[92m"
-var typedColor = "\033[1;37m"
-var errorColor = "\033[1;31m"
+var infoDoneColor = "\033[2;33m"
+var typedColor = "\033[97m"
+var errorColor = "\033[1;4;31m"
 
 // xterm cursor shape escape codes
 var defaultCursor = "\033[0 q"
 var blockCursor = "\033[1 q"
 var underlineCursor = "\033[3 q"
 var barCursor = "\033[5 q"
+
+var wordsString string
 
 // TODO: dont update info line while in a typing logic sycle
 // TODO: show mistyped chars
@@ -70,11 +74,12 @@ func main() {
 
 	// generate lines
 	line := ""
-	lines := []string{}
+	var lines []string
 	for i, word := range words {
 		// plus one for the space at the end
 		if len(line)+len(word)+1 > *maxLineLength {
 			lines = append(lines, line)
+			wordsString += line
 			line = ""
 		}
 
@@ -83,14 +88,14 @@ func main() {
 			line += " "
 		} else {
 			lines = append(lines, line)
+			wordsString += line
 		}
 	}
 	linesNum := len(lines)
-	wordsString := strings.Join(lines, "\n")
 
-	// print words and add placeholder info line
-	fmt.Println("0s -- WPM: 0")
-	printfColor(backgroundColor, "%s\r", wordsString)
+	// print words and placeholder info line
+	printfColor(infoStartColor, "000wpm  0s  0/%d  100%%\n", len(wordsString))
+	printfColor(backgroundColor, "%s\r", strings.Join(lines, "\n"))
 
 	// save cursor position at "(0, 0)" and move down to text start
 	fmt.Printf("\033[%dA\0337\033[1B", linesNum)
@@ -105,10 +110,10 @@ func main() {
 	// typing variables
 	firstInput := true
 	cursorIndex := 0
-	cursorRow := 1
-	cursorColumn := 1
+	cursorRow := 0
+	cursorColumn := 0
+	correct := 0
 	var typedChars []rune
-	var typedCharsStyled []string
 	var start time.Time
 
 	// draw info line
@@ -122,15 +127,9 @@ func main() {
 				if firstInput {
 					continue
 				}
-
-				// move cursor up to the position of the info line
 				fmt.Printf("\0338\033[2K\r")
-
-				// draw timer and wpm
-				printfColor(infoColor, "%s -- WPM: %.0f", time.Since(start).Round(time.Second), float64(len(typedChars))/5/time.Since(start).Minutes())
-
-				// move cursor back down
-				fmt.Printf("\033[%dB\033[%dG", cursorRow, cursorColumn)
+				printfColor(infoColor, "%03.0fwpm  %s  %d/%d  %.2f%%", float64(len(typedChars))/5/time.Since(start).Minutes(), time.Since(start).Round(time.Second), correct, len(wordsString), float64(correct)/float64(len(typedChars))*100)
+				fmt.Printf("\033[%dB\033[%dG", cursorRow+1, cursorColumn+1)
 			}
 		}
 	}()
@@ -156,60 +155,53 @@ func main() {
 		switch {
 		case char == 8 && *noBackspace == false || char == 127 && *noBackspace == false: // backspace
 			// dont backspace out of bounds
-			if cursorIndex-1 < 0 {
+			if cursorIndex <= 0 {
 				break
 			}
 			cursorIndex--
 			cursorColumn--
 
-			// remove char from typed chars
-			typedChars = typedChars[:len(typedChars)-1]
-			typedCharsStyled = typedCharsStyled[:len(typedCharsStyled)-1]
-
 			// line wrapping
-			if getIndexString(cursorIndex, wordsString) == '\n' {
-				cursorIndex--
+			if cursorColumn < 0 { // line wraps
 				cursorRow--
-				cursorColumn = len(lines[cursorRow-1])
-				typedCharsStyled = typedCharsStyled[:len(typedCharsStyled)-1]
-				fmt.Printf("\033[1A\033[%dG", cursorColumn)
-				printfColor(backgroundColor, "%c", getIndexString(cursorIndex, wordsString))
+				cursorColumn = len(lines[cursorRow]) - 1
+				fmt.Printf("\033[1A\033[%dG", cursorColumn+1)
+				printfColor(backgroundColor, "%c", getChar(cursorIndex))
 				fmt.Printf("\033[1D")
-			} else {
-				// move cursor back and replace letter
+			} else { // line does not wrap
 				fmt.Printf("\033[1D")
-				printfColor(backgroundColor, "%c", getIndexString(cursorIndex, wordsString))
+				printfColor(backgroundColor, "%c", getChar(cursorIndex))
 				fmt.Printf("\033[1D")
 			}
+
+			if typedChars[cursorIndex] == getChar(cursorIndex) {
+				correct--
+			}
+
+			typedChars = typedChars[:len(typedChars)-1]
 		case char >= 32 && char <= 126:
 			if firstInput {
 				start = time.Now()
 				firstInput = false
 			}
 
-			styledChar := ""
-
-			if getIndexString(cursorIndex, wordsString) == char {
-				styledChar = sprintfColor(typedColor, "%c", char)
-			} else if getIndexString(cursorIndex, wordsString) == ' ' {
-				styledChar = sprintfColor(errorColor, "_")
+			if getChar(cursorIndex) == char {
+				printfColor(typedColor, "%c", char)
+				correct++
+			} else if getChar(cursorIndex) == ' ' {
+				printfColor(errorColor, "_")
 			} else {
-				styledChar = sprintfColor(errorColor, "%c", getIndexString(cursorIndex, wordsString))
+				printfColor(errorColor, "%c", getChar(cursorIndex))
 			}
 
-			fmt.Printf("%s", styledChar)
-
 			typedChars = append(typedChars, char)
-			typedCharsStyled = append(typedCharsStyled, styledChar)
 			cursorIndex++
 			cursorColumn++
 
 			// line wrapping
-			if cursorIndex < len(wordsString) && getIndexString(cursorIndex, wordsString) == '\n' {
-				cursorIndex++
+			if cursorColumn >= len(lines[cursorRow]) && cursorIndex < len(wordsString) {
 				cursorRow++
-				cursorColumn = 1
-				typedCharsStyled = append(typedCharsStyled, "\n")
+				cursorColumn = 0
 				fmt.Printf("\033[1B\r")
 			}
 		}
@@ -221,40 +213,17 @@ func main() {
 	}
 
 	stopInfo <- true
-
-	// turn off raw mode
 	term.Restore(termHandle, oldState)
 
-	// clear everything and re print typed text one line up
-	fmt.Printf("\0338")
-	for range linesNum + 1 {
-		fmt.Printf("\033[2K\033[1B")
-	}
-	fmt.Printf("\0338%s\n", strings.Join(typedCharsStyled, ""))
-
-	// remove newlines from word string
-	wordsString = strings.ReplaceAll(wordsString, "\n", "")
-	if len(typedChars) != len([]rune(wordsString)) {
-		log.Fatal("slices have different size")
+	if len(typedChars) != len(wordsString) {
+		log.Fatal("typedChars is not the same length as wordsString")
 	}
 
-	// get and draw stats
+	// stats
 	timeTaken := time.Since(start)
-	correct := 0
-	incorrect := 0
-	for i := range typedChars {
-		if typedChars[i] == []rune(wordsString)[i] {
-			correct += 1
-		} else {
-			incorrect += 1
-		}
-	}
-
-	fmt.Printf("\n-- STATS --\n")
-	fmt.Printf("WPM: %.2f\n", float64(correct)/5/timeTaken.Minutes())
-	fmt.Printf("Raw WPM: %.2f\n", float64(len(typedChars))/5/timeTaken.Minutes())
-	fmt.Printf("Correct: %d/%d %.2f%%\n", correct, len(typedChars), float64(correct)/float64(len(wordsString))*100)
-	fmt.Printf("Time taken: %s\n", timeTaken.Round(time.Second))
+	fmt.Printf("\0338\033[2K\r")
+	printfColor(infoDoneColor, "%03.0fwpm  %s  %d/%d  %.2f%%", float64(correct)/5/timeTaken.Minutes(), timeTaken.Round(time.Second), correct, len(typedChars), float64(correct)/float64(len(typedChars))*100)
+	fmt.Printf("\033[%dB\n", linesNum)
 }
 
 func generateWords(ammount int, maxAmmount int, wordList []string) []string {
@@ -265,14 +234,10 @@ func generateWords(ammount int, maxAmmount int, wordList []string) []string {
 	return words
 }
 
-func getIndexString(index int, s string) rune {
-	return []rune(s)[index]
+func getChar(index int) rune {
+	return []rune(wordsString)[index]
 }
 
 func printfColor(colorCode string, format string, a ...any) (n int, err error) {
 	return fmt.Fprintf(os.Stdout, colorCode+format+resetColor, a...)
-}
-
-func sprintfColor(colorCode string, format string, a ...any) string {
-	return fmt.Sprintf(colorCode+format+resetColor, a...)
 }

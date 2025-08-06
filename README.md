@@ -3,9 +3,14 @@
 
 !["demo gif"](/demo.gif)
 
-The inspiration to make this came from getting my first split column staggered keyboard.
-Since I mainly work in the terminal, I also wanted a typing test in the terminal.
-So I made this, and maybe someone else can find some use out of it as well.
+TermTyper is a typing test in the terminal
+
+### Features
+- Minimalist CLI
+- Live stats display
+- Setting cursor shape
+- Proper line wrapping
+- Configurable line width
 
 ## Installation
 ```

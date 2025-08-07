@@ -1,14 +1,15 @@
 
 # TermTyper
 
-!["demo gif"](/demo.gif)
-
 TermTyper is a typing test in the terminal
 
-### Features
+!["demo gif"](/demo.gif)
+
+## Features
 - Minimalist CLI
 - Live stats display
 - Setting cursor shape
+- Custom word counts
 - Proper line wrapping
 - Configurable line width
 

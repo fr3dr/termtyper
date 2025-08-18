@@ -8,8 +8,10 @@ import (
 	"math/rand/v2"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
+	"github.com/fr3dr/termtyper/db"
 	"golang.org/x/term"
 )
 
@@ -34,12 +36,20 @@ var wordsString string
 // TODO: show mistyped chars
 // TODO: dont generate words longer than maxLineLength
 // TODO: timed mode
-// TODO: log stats to database
-// TODO: track more stats like character error rate, time taken to type character, most mistyped words
+// TODO: track more stats like time taken to type character
 // TODO: custom word lists, allow users to pipe wordlist file
 // TODO: add mode were when you get a character wrong you cant continue until you correct the character
+// TODO: multiplayer racing
+// TODO: add config file functionality
 func main() {
 	wordList := DefaultWordList
+
+	// get stats db file
+	cfgDir, err := os.UserConfigDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	dbFile := cfgDir + "/termtyper/stats.db"
 
 	// get terminal info
 	termHandle := int(os.Stderr.Fd())
@@ -54,7 +64,45 @@ func main() {
 	noBackspace := flag.Bool("b", false, "no backspace mode")
 	cursorShape := flag.String("c", "", "cursor shape 'bar' 'block' 'underline' leave blank to use default terminal cursor")
 	maxLineLength := flag.Int("l", width, "max length each line can be")
+	showStats := flag.Bool("s", false, "show stats")
 	flag.Parse()
+
+	if *showStats {
+		// get stats from database
+		results, charStats, err := db.GetAll(dbFile)
+		if err != nil {
+			log.Fatalf("Failed to get stats: %v", err)
+		}
+
+		// print char stats
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+		fmt.Fprintln(w, "char \tcorrect \tincorrect \taccuracy")
+		fmt.Fprintln(w, "---- \t------- \t--------- \t--------")
+		for _, v := range charStats {
+			fmt.Fprintf(w, "%c\t%d\t%d\t%.2f%%\n", v.Char, v.Correct, v.Incorrect, v.Accuracy)
+		}
+		w.Flush()
+
+		// print general stats
+		var ammount float64
+		var sumWPM float64
+		var sumAccuracy float64
+		var sumMistakes float64
+		var totalTime time.Duration
+		for _, v := range results {
+			ammount++
+			sumWPM += v.WPM
+			sumAccuracy += v.Accuracy
+			sumMistakes += float64(v.Mistakes)
+			totalTime += time.Duration(v.TimeTaken) * time.Second
+		}
+		fmt.Printf("Average WPM: %.2f\n", sumWPM/ammount)
+		fmt.Printf("Average Accuracy: %.2f%%\n", sumAccuracy/ammount)
+		fmt.Printf("Average Mistakes: %.2f\n", sumMistakes/ammount)
+		fmt.Printf("Time spent typing: %v\n", totalTime.Round(time.Millisecond))
+
+		return
+	}
 
 	// set cursor shape
 	switch *cursorShape {
@@ -94,7 +142,7 @@ func main() {
 	linesNum := len(lines)
 
 	// print words and placeholder info line
-	printfColor(infoStartColor, "000wpm  0s  0/%d  100%%\n", len(wordsString))
+	printfColor(infoStartColor, "000wpm  0s  0/%d/0  100%%\n", len(wordsString))
 	printfColor(backgroundColor, "%s\r", strings.Join(lines, "\n"))
 
 	// save cursor position at "(0, 0)" and move down to text start
@@ -113,7 +161,9 @@ func main() {
 	cursorRow := 0
 	cursorColumn := 0
 	correct := 0
+	mistakes := 0
 	var typedChars []rune
+	var charStats map[rune]db.CharStat = make(map[rune]db.CharStat, 95)
 	var start time.Time
 
 	// draw info line
@@ -128,7 +178,7 @@ func main() {
 					continue
 				}
 				fmt.Printf("\0338\033[2K\r")
-				printfColor(infoColor, "%03.0fwpm  %s  %d/%d  %.2f%%", float64(len(typedChars))/5/time.Since(start).Minutes(), time.Since(start).Round(time.Second), correct, len(wordsString), float64(correct)/float64(len(typedChars))*100)
+				printfColor(infoColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", float64(len(typedChars))/5/time.Since(start).Minutes(), time.Since(start).Round(time.Second), correct, len(wordsString), mistakes, float64(correct)/float64(len(typedChars))*100)
 				fmt.Printf("\033[%dB\033[%dG", cursorRow+1, cursorColumn+1)
 			}
 		}
@@ -185,14 +235,23 @@ func main() {
 				firstInput = false
 			}
 
+			charStat := charStats[getChar(cursorIndex)]
+
 			if getChar(cursorIndex) == char {
 				printfColor(typedColor, "%c", char)
 				correct++
+				charStat.Correct++
 			} else if getChar(cursorIndex) == ' ' {
 				printfColor(errorColor, "_")
+				charStat.Incorrect++
+				mistakes++
 			} else {
 				printfColor(errorColor, "%c", getChar(cursorIndex))
+				charStat.Incorrect++
+				mistakes++
 			}
+
+			charStats[getChar(cursorIndex)] = charStat
 
 			typedChars = append(typedChars, char)
 			cursorIndex++
@@ -221,9 +280,26 @@ func main() {
 
 	// stats
 	timeTaken := time.Since(start)
+	wpm := float64(correct) / 5 / timeTaken.Minutes()
+	accuracy := float64(correct) / float64(len(typedChars)) * 100
+
 	fmt.Printf("\0338\033[2K\r")
-	printfColor(infoDoneColor, "%03.0fwpm  %s  %d/%d  %.2f%%", float64(correct)/5/timeTaken.Minutes(), timeTaken.Round(time.Second), correct, len(typedChars), float64(correct)/float64(len(typedChars))*100)
+	printfColor(infoDoneColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", wpm, timeTaken.Round(time.Second), correct, len(typedChars), mistakes, accuracy)
 	fmt.Printf("\033[%dB\n", linesNum)
+
+	// save result
+	result := db.Result{
+		WPM:       wpm,
+		Accuracy:  accuracy,
+		Correct:   correct,
+		Total:     len(typedChars),
+		Mistakes:  mistakes,
+		TimeTaken: timeTaken.Seconds(),
+	}
+	err = db.Save(result, charStats, dbFile)
+	if err != nil {
+		log.Fatalf("Failed to save result: %v", err)
+	}
 }
 
 func generateWords(ammount int, maxAmmount int, wordList []string) []string {

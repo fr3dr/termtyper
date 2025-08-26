@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -32,10 +33,8 @@ var barCursor = "\033[5 q"
 
 var wordsString string
 
-// TODO: dont update info line while in a typing logic sycle
 // TODO: show mistyped chars
 // TODO: dont generate words longer than maxLineLength
-// TODO: timed mode
 // TODO: track more stats like time taken to type character
 // TODO: custom word lists, allow users to pipe wordlist file
 // TODO: add mode were when you get a character wrong you cant continue until you correct the character
@@ -65,6 +64,7 @@ func main() {
 	cursorShape := flag.String("c", "", "cursor shape 'bar' 'block' 'underline' leave blank to use default terminal cursor")
 	maxLineLength := flag.Int("l", width, "max length each line can be")
 	showStats := flag.Bool("s", false, "show stats")
+	timedMode := flag.Int("t", 0, "timed mode ")
 	flag.Parse()
 
 	if *showStats {
@@ -117,29 +117,32 @@ func main() {
 	}
 	defer fmt.Printf("%s", defaultCursor)
 
-	// generate words
-	words := generateWords(*wordsNum, *wordListAmmount, wordList)
-
 	// generate lines
 	line := ""
+	linesNum := 0
+	wordIndex := 0
 	var lines []string
-	for i, word := range words {
-		// plus one for the space at the end
+	for {
+		word := wordList[rand.IntN(*wordListAmmount)]
+		wordIndex++
 		if len(line)+len(word)+1 > *maxLineLength {
 			lines = append(lines, line)
 			wordsString += line
 			line = ""
+			linesNum++
+			if *timedMode > 0 && linesNum >= 3 {
+				break
+			}
 		}
-
 		line += word
-		if i+1 < len(words) {
-			line += " "
-		} else {
+		if *timedMode <= 0 && wordIndex >= *wordsNum {
 			lines = append(lines, line)
 			wordsString += line
+			linesNum++
+			break
 		}
+		line += " "
 	}
-	linesNum := len(lines)
 
 	// print words and placeholder info line
 	printfColor(infoStartColor, "000wpm  0s  0/%d/0  100%%\n", len(wordsString))
@@ -162,130 +165,167 @@ func main() {
 	cursorColumn := 0
 	correct := 0
 	mistakes := 0
+	var startTime time.Time
+	var endTime time.Time
 	var typedChars []rune
 	var charStats map[rune]db.CharStat = make(map[rune]db.CharStat, 95)
-	var start time.Time
+
+	ctx, cancel := context.WithCancel(context.Background())
+	exit := make(chan bool)
 
 	// draw info line
-	stopInfo := make(chan bool)
 	go func() {
-		for range time.Tick(100 * time.Millisecond) {
+		for range time.Tick(1 * time.Millisecond) {
 			select {
-			case <-stopInfo:
+			case <-ctx.Done():
 				return
 			default:
 				if firstInput {
 					continue
 				}
+				if *timedMode > 0 && time.Until(startTime.Add(time.Duration(*timedMode)*time.Second)) <= 0 {
+					endTime = time.Now()
+					cancel()
+					return
+				}
 				fmt.Printf("\0338\033[2K\r")
-				printfColor(infoColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", float64(len(typedChars))/5/time.Since(start).Minutes(), time.Since(start).Round(time.Second), correct, len(wordsString), mistakes, float64(correct)/float64(len(typedChars))*100)
+				printfColor(infoColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", float64(correct)/5/time.Since(startTime).Minutes(), time.Since(startTime).Round(time.Second), correct, len(wordsString), mistakes, float64(correct)/float64(len(typedChars))*100)
 				fmt.Printf("\033[%dB\033[%dG", cursorRow+1, cursorColumn+1)
 			}
 		}
 	}()
 
 	// typing logic
-	reader := bufio.NewReader(os.Stdin)
-	b := make([]byte, 1)
-	for {
-		reader.Read(b)
-		char := rune(b[0])
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		b := make([]byte, 1)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				if _, err := reader.Read(b); err != nil {
+					log.Fatal(err)
+				}
+				char := rune(b[0])
 
-		// quit on ctrl-c
-		if char == 3 {
-			stopInfo <- true
-			fmt.Printf("\0338")
-			for range linesNum + 1 {
-				fmt.Printf("\033[2K\033[1B")
+				// quit on ctrl-c
+				if char == 3 {
+					// clear everything
+					fmt.Printf("\0338")
+					for range linesNum + 1 {
+						fmt.Printf("\033[2K\033[1B")
+					}
+					fmt.Printf("\0338\r")
+					exit <- true
+					cancel()
+					return
+				}
+
+				switch {
+				case char == 8 && *noBackspace == false || char == 127 && *noBackspace == false: // backspace
+					// dont backspace out of bounds
+					if cursorIndex <= 0 {
+						break
+					}
+					cursorIndex--
+					cursorColumn--
+
+					// line wrapping
+					if cursorColumn < 0 { // line wraps
+						cursorRow--
+						cursorColumn = len(lines[cursorRow]) - 1
+						fmt.Printf("\033[1A\033[%dG", cursorColumn+1)
+						printfColor(backgroundColor, "%c", getChar(cursorIndex))
+						fmt.Printf("\033[1D")
+					} else { // line does not wrap
+						fmt.Printf("\033[1D")
+						printfColor(backgroundColor, "%c", getChar(cursorIndex))
+						fmt.Printf("\033[1D")
+					}
+
+					if typedChars[cursorIndex] == getChar(cursorIndex) {
+						correct--
+					}
+
+					typedChars = typedChars[:len(typedChars)-1]
+				case char >= 32 && char <= 126:
+					if firstInput {
+						startTime = time.Now()
+						firstInput = false
+					}
+
+					charStat := charStats[getChar(cursorIndex)]
+
+					if getChar(cursorIndex) == char {
+						printfColor(typedColor, "%c", char)
+						correct++
+						charStat.Correct++
+					} else if getChar(cursorIndex) == ' ' {
+						printfColor(errorColor, "_")
+						charStat.Incorrect++
+						mistakes++
+					} else {
+						printfColor(errorColor, "%c", getChar(cursorIndex))
+						charStat.Incorrect++
+						mistakes++
+					}
+
+					charStats[getChar(cursorIndex)] = charStat
+
+					typedChars = append(typedChars, char)
+					cursorIndex++
+					cursorColumn++
+
+					// line wrapping
+					if cursorColumn >= len(lines[cursorRow]) && cursorIndex < len(wordsString) {
+						cursorRow++
+						cursorColumn = 0
+						fmt.Printf("\033[1B\r")
+						// add new line in timed mode
+						if *timedMode > 0 && cursorRow == linesNum-1 {
+							line := ""
+							for {
+								word := wordList[rand.IntN(*wordListAmmount)]
+								if len(line)+len(word)+1 > *maxLineLength {
+									lines = append(lines, line)
+									wordsString += line
+									linesNum++
+									break
+								}
+								line += word + " "
+							}
+							printfColor(backgroundColor, "\n%s\r", line)
+							fmt.Printf("\033[%dA\0337\033[%dB", linesNum, linesNum-1)
+						}
+					}
+				}
+
+				// end game
+				if cursorIndex == len(wordsString) || *timedMode > 0 && time.Until(startTime.Add(time.Duration(*timedMode)*time.Second)) <= 0 {
+					endTime = time.Now()
+					cancel()
+					return
+				}
 			}
-			fmt.Printf("\0338\r")
-			return
 		}
+	}()
 
-		switch {
-		case char == 8 && *noBackspace == false || char == 127 && *noBackspace == false: // backspace
-			// dont backspace out of bounds
-			if cursorIndex <= 0 {
-				break
-			}
-			cursorIndex--
-			cursorColumn--
-
-			// line wrapping
-			if cursorColumn < 0 { // line wraps
-				cursorRow--
-				cursorColumn = len(lines[cursorRow]) - 1
-				fmt.Printf("\033[1A\033[%dG", cursorColumn+1)
-				printfColor(backgroundColor, "%c", getChar(cursorIndex))
-				fmt.Printf("\033[1D")
-			} else { // line does not wrap
-				fmt.Printf("\033[1D")
-				printfColor(backgroundColor, "%c", getChar(cursorIndex))
-				fmt.Printf("\033[1D")
-			}
-
-			if typedChars[cursorIndex] == getChar(cursorIndex) {
-				correct--
-			}
-
-			typedChars = typedChars[:len(typedChars)-1]
-		case char >= 32 && char <= 126:
-			if firstInput {
-				start = time.Now()
-				firstInput = false
-			}
-
-			charStat := charStats[getChar(cursorIndex)]
-
-			if getChar(cursorIndex) == char {
-				printfColor(typedColor, "%c", char)
-				correct++
-				charStat.Correct++
-			} else if getChar(cursorIndex) == ' ' {
-				printfColor(errorColor, "_")
-				charStat.Incorrect++
-				mistakes++
-			} else {
-				printfColor(errorColor, "%c", getChar(cursorIndex))
-				charStat.Incorrect++
-				mistakes++
-			}
-
-			charStats[getChar(cursorIndex)] = charStat
-
-			typedChars = append(typedChars, char)
-			cursorIndex++
-			cursorColumn++
-
-			// line wrapping
-			if cursorColumn >= len(lines[cursorRow]) && cursorIndex < len(wordsString) {
-				cursorRow++
-				cursorColumn = 0
-				fmt.Printf("\033[1B\r")
-			}
-		}
-
-		// end game
-		if cursorIndex == len(wordsString) {
-			break
-		}
-	}
-
-	stopInfo <- true
-	term.Restore(termHandle, oldState)
-
-	if len(typedChars) != len(wordsString) {
-		log.Fatal("typedChars is not the same length as wordsString")
+	select {
+	case <-ctx.Done():
+		break
+	case <-exit:
+		return
 	}
 
 	// stats
-	timeTaken := time.Since(start)
+	timeTaken := endTime.Sub(startTime)
 	wpm := float64(correct) / 5 / timeTaken.Minutes()
 	accuracy := float64(correct) / float64(len(typedChars)) * 100
 
 	fmt.Printf("\0338\033[2K\r")
 	printfColor(infoDoneColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", wpm, timeTaken.Round(time.Second), correct, len(typedChars), mistakes, accuracy)
-	fmt.Printf("\033[%dB\n", linesNum)
+	fmt.Printf("\033[%dB\r\n", linesNum)
 
 	// save result
 	result := db.Result{
@@ -300,14 +340,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to save result: %v", err)
 	}
-}
-
-func generateWords(ammount int, maxAmmount int, wordList []string) []string {
-	var words []string
-	for range ammount {
-		words = append(words, wordList[rand.IntN(maxAmmount)])
-	}
-	return words
 }
 
 func getChar(index int) rune {

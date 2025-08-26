@@ -175,7 +175,7 @@ func main() {
 
 	// draw info line
 	go func() {
-		for range time.Tick(1 * time.Millisecond) {
+		for range time.Tick(100 * time.Millisecond) {
 			select {
 			case <-ctx.Done():
 				return

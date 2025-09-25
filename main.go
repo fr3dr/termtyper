@@ -65,6 +65,7 @@ func main() {
 	maxLineLength := flag.Int("l", width, "max length each line can be")
 	showStats := flag.Bool("s", false, "show stats")
 	timedMode := flag.Int("t", 0, "timed mode ")
+	correctOnly := flag.Bool("o", false, "only continue once the correct character is typed")
 	flag.Parse()
 
 	if *showStats {
@@ -165,6 +166,7 @@ func main() {
 	cursorColumn := 0
 	correct := 0
 	mistakes := 0
+	mistakeMade := false
 	var startTime time.Time
 	var endTime time.Time
 	var typedChars []rune
@@ -223,7 +225,7 @@ func main() {
 				}
 
 				switch {
-				case char == 8 && *noBackspace == false || char == 127 && *noBackspace == false: // backspace
+				case (char == 127 || char == 8) && *noBackspace == false && *correctOnly == false: // backspace
 					// dont backspace out of bounds
 					if cursorIndex <= 0 {
 						break
@@ -257,25 +259,42 @@ func main() {
 
 					charStat := charStats[getChar(cursorIndex)]
 
+					if *correctOnly == false || !mistakeMade {
+						typedChars = append(typedChars, char)
+					}
+
 					if getChar(cursorIndex) == char {
-						printfColor(typedColor, "%c", char)
-						correct++
-						charStat.Correct++
-					} else if getChar(cursorIndex) == ' ' {
-						printfColor(errorColor, "_")
-						charStat.Incorrect++
-						mistakes++
+						if *correctOnly && mistakeMade {
+							mistakeMade = false
+							if getChar(cursorIndex) == ' ' {
+								printfColor(errorColor, "_")
+							} else {
+								printfColor(errorColor, "%c", getChar(cursorIndex))
+							}
+						} else {
+							correct++
+							charStat.Correct++
+							printfColor(typedColor, "%c", char)
+						}
 					} else {
-						printfColor(errorColor, "%c", getChar(cursorIndex))
-						charStat.Incorrect++
 						mistakes++
+						charStat.Incorrect++
+						if *correctOnly {
+							mistakeMade = true
+							typedChars[cursorIndex] = char
+						} else if getChar(cursorIndex) == ' ' {
+							printfColor(errorColor, "_")
+						} else {
+							printfColor(errorColor, "%c", getChar(cursorIndex))
+						}
 					}
 
 					charStats[getChar(cursorIndex)] = charStat
 
-					typedChars = append(typedChars, char)
-					cursorIndex++
-					cursorColumn++
+					if *correctOnly == false || !mistakeMade {
+						cursorIndex++
+						cursorColumn++
+					}
 
 					// line wrapping
 					if cursorColumn >= len(lines[cursorRow]) && cursorIndex < len(wordsString) {

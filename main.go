@@ -191,7 +191,7 @@ func main() {
 					return
 				}
 				fmt.Printf("\0338\033[2K\r")
-				printfColor(infoColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", float64(correct)/5/time.Since(startTime).Minutes(), time.Since(startTime).Round(time.Second), correct, len(wordsString), mistakes, float64(correct)/float64(len(typedChars))*100)
+				printfColor(infoColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", float64(correct)/5/time.Since(startTime).Minutes(), time.Since(startTime).Round(time.Second), correct, len(wordsString), mistakes, float64(correct)/float64(correct+mistakes)*100)
 				fmt.Printf("\033[%dB\033[%dG", cursorRow+1, cursorColumn+1)
 			}
 		}
@@ -340,7 +340,7 @@ func main() {
 	// stats
 	timeTaken := endTime.Sub(startTime)
 	wpm := float64(correct) / 5 / timeTaken.Minutes()
-	accuracy := float64(correct) / float64(len(typedChars)) * 100
+	accuracy := float64(correct) / float64(correct+mistakes) * 100
 
 	fmt.Printf("\0338\033[2K\r")
 	printfColor(infoDoneColor, "%03.0fwpm  %s  %d/%d/%d  %.2f%%", wpm, timeTaken.Round(time.Second), correct, len(typedChars), mistakes, accuracy)

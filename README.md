@@ -7,8 +7,10 @@ TermTyper is a typing test in the terminal
 
 ## Features
 - Minimalist CLI
+- Timed and word count modes
 - Live stats display
 - Saving stats to database
+- Config file support
 - Setting cursor shape
 - Custom word counts
 - Proper line wrapping

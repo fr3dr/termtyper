@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -12,24 +11,29 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/fr3dr/termtyper/config"
 	"github.com/fr3dr/termtyper/db"
 	"golang.org/x/term"
 )
 
 // ANSI color escape codes
-var resetColor = "\033[0m"
-var backgroundColor = "\033[90m"
-var infoStartColor = "\033[2;92m"
-var infoColor = "\033[92m"
-var infoDoneColor = "\033[2;33m"
-var typedColor = "\033[97m"
-var errorColor = "\033[1;4;31m"
+var (
+	resetColor      = "\033[0m"
+	backgroundColor = "\033[90m"
+	infoStartColor  = "\033[2;92m"
+	infoColor       = "\033[92m"
+	infoDoneColor   = "\033[2;33m"
+	typedColor      = "\033[97m"
+	errorColor      = "\033[1;4;31m"
+)
 
 // xterm cursor shape escape codes
-var defaultCursor = "\033[0 q"
-var blockCursor = "\033[1 q"
-var underlineCursor = "\033[3 q"
-var barCursor = "\033[5 q"
+var (
+	defaultCursor   = "\033[0 q"
+	blockCursor     = "\033[1 q"
+	underlineCursor = "\033[3 q"
+	barCursor       = "\033[5 q"
+)
 
 var wordsString string
 
@@ -37,18 +41,15 @@ var wordsString string
 // TODO: dont generate words longer than maxLineLength
 // TODO: track more stats like time taken to type character
 // TODO: custom word lists, allow users to pipe wordlist file
-// TODO: add mode were when you get a character wrong you cant continue until you correct the character
 // TODO: multiplayer racing
-// TODO: add config file functionality
 func main() {
 	wordList := DefaultWordList
 
 	// get stats db file
-	cfgDir, err := os.UserConfigDir()
+	dbFile, err := config.ConfigDirGetFile("stats.db")
 	if err != nil {
 		log.Fatal(err)
 	}
-	dbFile := cfgDir + "/termtyper/stats.db"
 
 	// get terminal info
 	termHandle := int(os.Stderr.Fd())
@@ -57,18 +58,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// get flags
-	wordListAmmount := flag.Int("n", len(wordList), "ammount of words to use from word list. max: 1000")
-	wordsNum := flag.Int("w", 25, "number of words")
-	noBackspace := flag.Bool("b", false, "no backspace mode")
-	cursorShape := flag.String("c", "", "cursor shape 'bar' 'block' 'underline' leave blank to use default terminal cursor")
-	maxLineLength := flag.Int("l", width, "max length each line can be")
-	showStats := flag.Bool("s", false, "show stats")
-	timedMode := flag.Int("t", 0, "timed mode ")
-	correctOnly := flag.Bool("o", false, "only continue once the correct character is typed")
-	flag.Parse()
+	// get config with default config
+	cfg, err := config.GetConfig(config.Config{
+		WordCount:       25,
+		WordListAmmount: len(wordList),
+		MaxLineLength:   width,
+		TimedMode:       0,
+		NoBackspace:     false,
+		CorrectOnly:     false,
+		ShowStats:       false,
+		CursorShape:     "",
+	})
+	if err != nil {
+		log.Fatalf("Failed to get config: %v", err)
+	}
 
-	if *showStats {
+	if cfg.ShowStats {
 		// get stats from database
 		results, charStats, err := db.GetAll(dbFile)
 		if err != nil {
@@ -106,7 +111,7 @@ func main() {
 	}
 
 	// set cursor shape
-	switch *cursorShape {
+	switch cfg.CursorShape {
 	case "block":
 		fmt.Printf("%s", blockCursor)
 	case "bar":
@@ -124,19 +129,19 @@ func main() {
 	wordIndex := 0
 	var lines []string
 	for {
-		word := wordList[rand.IntN(*wordListAmmount)]
+		word := wordList[rand.IntN(cfg.WordListAmmount)]
 		wordIndex++
-		if len(line)+len(word)+1 > *maxLineLength {
+		if len(line)+len(word)+1 > cfg.MaxLineLength {
 			lines = append(lines, line)
 			wordsString += line
 			line = ""
 			linesNum++
-			if *timedMode > 0 && linesNum >= 3 {
+			if cfg.TimedMode > 0 && linesNum >= 3 {
 				break
 			}
 		}
 		line += word
-		if *timedMode <= 0 && wordIndex >= *wordsNum {
+		if cfg.TimedMode <= 0 && wordIndex >= cfg.WordCount {
 			lines = append(lines, line)
 			wordsString += line
 			linesNum++
@@ -185,7 +190,7 @@ func main() {
 				if firstInput {
 					continue
 				}
-				if *timedMode > 0 && time.Until(startTime.Add(time.Duration(*timedMode)*time.Second)) <= 0 {
+				if cfg.TimedMode > 0 && time.Until(startTime.Add(time.Duration(cfg.TimedMode)*time.Second)) <= 0 {
 					endTime = time.Now()
 					cancel()
 					return
@@ -225,7 +230,7 @@ func main() {
 				}
 
 				switch {
-				case (char == 127 || char == 8) && *noBackspace == false && *correctOnly == false: // backspace
+				case (char == 127 || char == 8) && !cfg.NoBackspace && !cfg.CorrectOnly: // backspace
 					// dont backspace out of bounds
 					if cursorIndex <= 0 {
 						break
@@ -259,12 +264,12 @@ func main() {
 
 					charStat := charStats[getChar(cursorIndex)]
 
-					if *correctOnly == false || !mistakeMade {
+					if !cfg.CorrectOnly || !mistakeMade {
 						typedChars = append(typedChars, char)
 					}
 
 					if getChar(cursorIndex) == char {
-						if *correctOnly && mistakeMade {
+						if cfg.CorrectOnly && mistakeMade {
 							mistakeMade = false
 							if getChar(cursorIndex) == ' ' {
 								printfColor(errorColor, "_")
@@ -279,7 +284,7 @@ func main() {
 					} else {
 						mistakes++
 						charStat.Incorrect++
-						if *correctOnly {
+						if cfg.CorrectOnly {
 							mistakeMade = true
 							typedChars[cursorIndex] = char
 						} else if getChar(cursorIndex) == ' ' {
@@ -291,7 +296,7 @@ func main() {
 
 					charStats[getChar(cursorIndex)] = charStat
 
-					if *correctOnly == false || !mistakeMade {
+					if !cfg.CorrectOnly || !mistakeMade {
 						cursorIndex++
 						cursorColumn++
 					}
@@ -302,11 +307,11 @@ func main() {
 						cursorColumn = 0
 						fmt.Printf("\033[1B\r")
 						// add new line in timed mode
-						if *timedMode > 0 && cursorRow == linesNum-1 {
+						if cfg.TimedMode > 0 && cursorRow == linesNum-1 {
 							line := ""
 							for {
-								word := wordList[rand.IntN(*wordListAmmount)]
-								if len(line)+len(word)+1 > *maxLineLength {
+								word := wordList[rand.IntN(cfg.WordListAmmount)]
+								if len(line)+len(word)+1 > cfg.MaxLineLength {
 									lines = append(lines, line)
 									wordsString += line
 									linesNum++
@@ -321,7 +326,7 @@ func main() {
 				}
 
 				// end game
-				if cursorIndex == len(wordsString) || *timedMode > 0 && time.Until(startTime.Add(time.Duration(*timedMode)*time.Second)) <= 0 {
+				if cursorIndex == len(wordsString) || cfg.TimedMode > 0 && time.Until(startTime.Add(time.Duration(cfg.TimedMode)*time.Second)) <= 0 {
 					endTime = time.Now()
 					cancel()
 					return

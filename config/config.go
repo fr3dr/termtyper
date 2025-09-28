@@ -60,6 +60,14 @@ func GetConfig(defaultConfig Config) (Config, error) {
 	flag.StringVar(&config.CursorShape, "c", config.CursorShape, "cursor shape 'bar' 'block' 'underline' leave blank to use default terminal cursor")
 	flag.Parse()
 
+	// word count mode has priority over timed mode
+	// this fixes -w not working when timed_mode is set in the config file
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "w" {
+			config.TimedMode = 0
+		}
+	})
+
 	return config, nil
 }
 

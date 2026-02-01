@@ -17,6 +17,7 @@ type Config struct {
 	NoBackspace     bool   `json:"no_backspace"`
 	CorrectOnly     bool   `json:"correct_only"`
 	CursorShape     string `json:"cursor_shape"`
+	WordListFile    string `json:"word_list_file"`
 
 	// flag only
 	ShowStats bool
@@ -58,6 +59,7 @@ func GetConfig(defaultConfig Config) (Config, error) {
 	flag.BoolVar(&config.CorrectOnly, "o", config.CorrectOnly, "only continue once the correct character is typed")
 	flag.BoolVar(&config.ShowStats, "s", config.ShowStats, "show stats")
 	flag.StringVar(&config.CursorShape, "c", config.CursorShape, "cursor shape 'bar' 'block' 'underline' leave blank to use default terminal cursor")
+	flag.StringVar(&config.WordListFile, "f", config.WordListFile, "path to word list file")
 	flag.Parse()
 
 	// word count mode has priority over timed mode

@@ -40,7 +40,7 @@ var wordsString string
 // TODO: show mistyped chars
 // TODO: dont generate words longer than maxLineLength
 // TODO: track more stats like time taken to type character
-// TODO: custom word lists, allow users to pipe wordlist file
+// TODO: config documentation
 // TODO: multiplayer racing
 func main() {
 	wordList := DefaultWordList
@@ -68,9 +68,24 @@ func main() {
 		CorrectOnly:     false,
 		ShowStats:       false,
 		CursorShape:     "",
+		WordListFile:    "",
 	})
 	if err != nil {
 		log.Fatalf("Failed to get config: %v", err)
+	}
+
+	if cfg.WordListFile != "" {
+		file, err := os.Open(cfg.WordListFile)
+		if err != nil {
+			log.Fatalf("Failed to open word list file: %v", err)
+		}
+		defer file.Close()
+		wordList = []string{}
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			wordList = append(wordList, scanner.Text())
+		}
+		cfg.WordListAmmount = len(wordList)
 	}
 
 	if cfg.ShowStats {

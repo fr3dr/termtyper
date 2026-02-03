@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"io"
 	"os"
 )
 
@@ -39,12 +38,9 @@ func GetConfig(defaultConfig Config) (Config, error) {
 			return defaultConfig, err
 		}
 
-		b, err := io.ReadAll(configFile)
-		if err != nil {
-			return defaultConfig, err
-		}
-
-		err = json.Unmarshal(b, &config)
+		decoder := json.NewDecoder(configFile)
+		decoder.DisallowUnknownFields()
+		err = decoder.Decode(&config)
 		if err != nil {
 			return defaultConfig, err
 		}

@@ -220,7 +220,7 @@ func main() {
 	// typing logic
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
-		b := make([]byte, 1)
+		b := make([]byte, 2)
 		for {
 			select {
 			case <-ctx.Done():
@@ -245,7 +245,43 @@ func main() {
 				}
 
 				switch {
-				case (char == 127 || char == 8) && !cfg.NoBackspace && !cfg.CorrectOnly: // backspace
+				case (char == 8 || b[0] == 27 && b[1] == 127) && !cfg.NoBackspace && !cfg.CorrectOnly: // delete word
+					if cursorIndex <= 0 {
+						break
+					}
+
+					deletedString := ""
+					nonWhitespaceFound := false
+					for cursorIndex > 0 && (getChar(cursorIndex - 1) != ' ' || !nonWhitespaceFound) {
+						cursorIndex--
+						cursorColumn--
+
+						if getChar(cursorIndex) != ' ' {
+							nonWhitespaceFound = true
+						}
+						if typedChars[cursorIndex] == getChar(cursorIndex) {
+							correct--
+						}
+
+						// line wraps
+						if cursorColumn < 0 {
+							cursorRow--
+							cursorColumn = len(lines[cursorRow]) - 1
+							fmt.Printf("\033[0G")
+							printfColor(backgroundColor, "%s", deletedString)
+							fmt.Printf("\033[1A\033[%dG", cursorColumn+2)
+							deletedString = ""
+						}
+
+						deletedString = string(getChar(cursorIndex)) + deletedString
+					}
+
+					fmt.Printf("\033[%vD", len(deletedString))
+					printfColor(backgroundColor, "%s", deletedString)
+					fmt.Printf("\033[%vD", len(deletedString))
+
+					typedChars = typedChars[:len(typedChars)-len(deletedString)]
+				case char == 127 && !cfg.NoBackspace && !cfg.CorrectOnly: // backspace
 					// dont backspace out of bounds
 					if cursorIndex <= 0 {
 						break
@@ -341,7 +377,7 @@ func main() {
 				}
 
 				// end game
-				if cursorIndex == len(wordsString) || cfg.TimedMode > 0 && time.Until(startTime.Add(time.Duration(cfg.TimedMode)*time.Second)) <= 0 {
+				if cursorIndex == len(wordsString) || !firstInput && cfg.TimedMode > 0 && time.Until(startTime.Add(time.Duration(cfg.TimedMode)*time.Second)) <= 0 {
 					endTime = time.Now()
 					cancel()
 					return

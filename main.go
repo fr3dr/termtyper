@@ -42,6 +42,7 @@ var wordsString string
 // TODO: track more stats like time taken to type character
 // TODO: config documentation
 // TODO: multiplayer racing
+// TODO: better stats display
 func main() {
 	wordList := DefaultWordList
 
@@ -84,6 +85,9 @@ func main() {
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
 			wordList = append(wordList, scanner.Text())
+		}
+		if scanner.Err() != nil {
+			log.Fatalf("Error while reading word list file: %v", err)
 		}
 		cfg.WordListAmmount = len(wordList)
 	}
